@@ -11,6 +11,10 @@ It is **read-only** by default — it only reads Claude's transcript files under
 `~/.claude/projects/` — with one opt-in exception, `wwid --rename`, which names
 un-named chats (and backs them up first). See *Renaming* below.
 
+Looks like this 👇:
+<img width="1823" height="610" alt="CleanShot 2026-06-02 at 16 41 12" src="https://github.com/user-attachments/assets/905f02be-54bb-4894-acfd-d31b43ebc03b" />
+<img width="1825" height="540" alt="CleanShot 2026-06-02 at 16 40 55" src="https://github.com/user-attachments/assets/48b8195a-7931-454d-8a7b-0d878bd9392e" />
+
 ## 📦 Install
 
 ```bash
