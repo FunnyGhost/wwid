@@ -394,6 +394,7 @@ def run_picker(sessions, query=None):
         "--border",
         "--padding", "0,1",
         "--prompt", "chat ❯ ",
+        "--ghost", "search by name, PR, project, or first prompt…",
         "--pointer", "▶",
     ]
     if query:
