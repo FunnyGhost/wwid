@@ -470,6 +470,15 @@ def resume(session_id, cwd):
         chosen = choose_sandbox(boxes)
         if chosen:
             mc = shutil.which("miro-contain")
+            # `miro-contain attach` prints nothing while it starts the VM and
+            # stages credentials, so say something first — otherwise the
+            # terminal just sits there looking dead for a few seconds.
+            # os.execv does not flush Python's buffers, so anything still
+            # buffered is lost. stderr is line-buffered and would survive on
+            # its own; flush=True is here so this keeps working if it is ever
+            # moved to stdout, which IS dropped unflushed when piped.
+            print(f"\n  🐙 diving into {chosen} — sandboxes take a few "
+                  f"seconds to surface…\n", file=sys.stderr, flush=True)
             # `attach` (rather than `run`) is what reports agent state to herdr,
             # and it reuses the sandbox instead of creating another one.
             os.execv(mc, [mc, "attach", chosen, "--", "--resume", session_id])
