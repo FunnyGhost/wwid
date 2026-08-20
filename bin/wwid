@@ -9,6 +9,8 @@ WHAT IT DOES
   • Shows them in an interactive fuzzy picker (using the `fzf` program).
   • When you pick one, it re-opens that chat with `claude --resume`.
   • You can also jump straight to the chat that created a given pull request.
+  • If `miro-contain` is installed and a sandbox mounts the chat's folder, it
+    asks first whether to resume in there. WWID_NO_SANDBOX=1 never asks.
 
 It is READ-ONLY by default — it only reads Claude's transcript files — with
 ONE exception: `wwid --rename` gives a short, content-based name to chats you
@@ -59,6 +61,10 @@ W_NAME, W_AGE, W_CTX, W_MSGS, W_PR, W_PROJ, W_PROMPT = 34, 9, 5, 6, 22, 24, 50
 # First messages that are too generic to use as a chat's name. If the first
 # thing typed was one of these, we look for a better name instead.
 TRIVIAL = {"resume", "continue", "exit", "clear", "y", "yes", "ok", "no"}
+
+# Marks the "run on the host" row in the sandbox prompt. A leading colon can
+# never be a sandbox name, so it cannot collide with a real one.
+HOST = ":host"
 
 
 def die(msg, code=1):
@@ -343,14 +349,131 @@ def sep_row():
 # Actions: resume a chat, run the picker, list, find by PR
 # ──────────────────────────────────────────────────────────────────────────
 
+# ──────────────────────────────────────────────────────────────────────────
+# Optional: miro-contain sandboxes
+#
+# miro-contain (https://github.com/miroapp-dev/miro-contain) runs Claude inside
+# a Linux VM that mounts a chosen set of host folders at their real paths, and
+# shares ~/.claude/projects — so a chat can be resumed inside the VM and it is
+# the same transcript. If it is not installed, none of this runs and wwid
+# behaves exactly as before.
+# ──────────────────────────────────────────────────────────────────────────
+
+def is_within(path, folder):
+    """True if `path` is `folder` or sits inside it. Compares whole path
+    segments, so /dev/client does not match /dev/client-experiments."""
+    try:
+        path, folder = os.path.realpath(path), os.path.realpath(folder)
+    except OSError:
+        return False
+    return path == folder or path.startswith(folder + os.sep)
+
+
+def is_plumbing(path):
+    """A sandbox also mounts its own internals — ~/.claude, staging dirs,
+    credential sockets. Those are not project folders, and matching on them
+    would make every chat look like it belongs to a sandbox."""
+    home = os.path.expanduser("~")
+    return (
+        path.startswith(os.path.join(home, ".claude"))
+        or path.startswith(os.path.join(home, ".miro-contain"))
+        or path.startswith("/var/")
+        or path.startswith("/private/var/")
+    )
+
+
+def sandboxes_for(cwd):
+    """
+    Sandboxes that can actually see this chat's folder, newest listing first.
+
+    We only offer a sandbox that mounts the folder — inside any other one
+    Claude could not read the files, so it would not be a real choice.
+
+    Any hiccup (not installed, bad JSON, slow) returns [] rather than getting
+    between you and your chat.
+    """
+    if not cwd or os.environ.get("WWID_NO_SANDBOX"):
+        return []
+    mc = shutil.which("miro-contain")
+    if not mc:
+        return []
+    try:
+        out = subprocess.run(
+            [mc, "ls", "--json"], capture_output=True, text=True, timeout=5
+        )
+        boxes = json.loads(out.stdout) if out.returncode == 0 else []
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return []
+
+    matches = []
+    for box in boxes:
+        folders = [w for w in box.get("workspaces", []) if not is_plumbing(w)]
+        if any(is_within(cwd, f) for f in folders):
+            matches.append(box)
+    return matches
+
+
+def choose_sandbox(boxes):
+    """
+    Ask where to re-open the chat: one of the sandboxes, or here on the host.
+
+    Returns the chosen sandbox name, or None for the host. Esc cancels the
+    whole thing, same as the chat picker.
+    """
+    if not shutil.which("fzf"):
+        return None
+
+    rows = [TAB.join([b["name"], f'{b["name"]}   ({b.get("status", "?")})'])
+            for b in boxes]
+    rows.append(TAB.join([HOST, "here on the host   (plain claude)"]))
+
+    # Attaching from inside a herdr pane lets miro-contain report the agent's
+    # real idle/working/blocked state instead of herdr guessing from the screen.
+    note = "   ·   herdr detected" if os.environ.get("HERDR_PANE_ID") else ""
+    args = [
+        "fzf",
+        "--delimiter", TAB,
+        "--with-nth", "2",
+        "--header", f"where should this chat resume?{note}\n\n",
+        "--color", "header:bold:15",
+        "--no-sort",
+        "--height", "~40%",
+        "--reverse",
+        "--border",
+        "--padding", "0,1",
+        "--prompt", "run in ❯ ",
+        "--pointer", "▶",
+    ]
+    proc = subprocess.run(args, input="\n".join(rows), capture_output=True, text=True)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        sys.exit(0)  # user pressed Esc
+    # Split the raw line, NOT a stripped one: stripping would eat the leading
+    # TAB of a row whose first field is empty and shift every field left.
+    choice = proc.stdout.split("\n")[0].split(TAB)[0]
+    return None if choice == HOST else choice
+
+
 def resume(session_id, cwd):
     """
     Re-open a chat. We `cd` into its original folder first (so file paths and
     tools behave), then hand the terminal over to `claude --resume`.
     os.execv REPLACES this script with claude — wwid is gone after this.
+
+    If miro-contain is installed and a sandbox mounts this folder, we ask first
+    whether to resume in there instead. Set WWID_NO_SANDBOX=1 to never ask.
     """
     if cwd and os.path.isdir(cwd):
         os.chdir(cwd)
+
+    boxes = sandboxes_for(cwd)
+    if boxes:
+        chosen = choose_sandbox(boxes)
+        if chosen:
+            mc = shutil.which("miro-contain")
+            # `attach` (rather than `run`) is what reports agent state to herdr,
+            # and it reuses the sandbox instead of creating another one.
+            os.execv(mc, [mc, "attach", chosen, "--", "--resume", session_id])
+
     claude = shutil.which("claude")
     if not claude:
         die("`claude` not found on PATH")

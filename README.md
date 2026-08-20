@@ -39,6 +39,10 @@ brew install --HEAD FunnyGhost/tap/wwid
 `fzf` and Python are pulled in automatically. Claude Code is the one thing you
 need yourself — `wwid` tells you if it's missing.
 
+Optionally, if [`miro-contain`](https://github.com/miroapp-dev/miro-contain) is
+on your `PATH`, `wwid` can resume a chat inside a sandbox — see
+[Sandboxes](#sandboxes-optional). Nothing changes if you don't have it.
+
 ## 🧭 Usage
 
 ```bash
@@ -57,6 +61,32 @@ wwid -h | --help     # usage
 - **Enter** resumes the highlighted chat — `wwid` `cd`s into the chat's
   original folder, then hands off to `claude --resume <id>`.
 - **Esc** cancels without doing anything.
+
+### Sandboxes (optional)
+
+If [`miro-contain`](https://github.com/miroapp-dev/miro-contain) is installed,
+`wwid` checks whether any sandbox mounts the chat's folder. If one does, it asks
+where to resume before handing off:
+
+```
+where should this chat resume?
+
+run in ❯
+  ▶ mc-my-project   (running)
+    here on the host   (plain claude)
+```
+
+A sandbox runs Claude inside a Linux VM that mounts your folders at their real
+paths and shares `~/.claude/projects` — so it is the same transcript either way.
+Only sandboxes that actually mount the folder are offered; inside any other one
+Claude could not read the files.
+
+`wwid` hands off with `miro-contain attach`, which is also what reports live
+agent state when you are running under [herdr](https://herdr.dev).
+
+If `miro-contain` isn't installed, or no sandbox mounts the folder, nothing
+changes — **Enter** goes straight to `claude --resume` as always. Set
+`WWID_NO_SANDBOX=1` to never ask.
 
 ### Columns
 
